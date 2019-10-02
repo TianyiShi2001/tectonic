@@ -536,10 +536,9 @@ unsafe extern "C" fn selectglyph(
      * agl.c currently only knows less ambiguos cases;
      * e.g., 'sc', 'superior', etc.
      */
-    let r = agl_suffix_to_otltag(s); /* 'suffix' may represent feature tag. */
-    if !r.is_null() {
+    if let Some(r) = agl_suffix_to_otltag(CStr::from_ptr(s).to_bytes()) /* 'suffix' may represent feature tag. */ {
         /* We found feature tag for 'suffix'. */
-        error = select_gsub(CStr::from_ptr(r).to_bytes(), gm); /* no fallback for this */
+        error = select_gsub(r, gm); /* no fallback for this */
         if error == 0 {
             error = otl_gsub_apply((*gm).gsub, &mut in_0)
         }
@@ -854,7 +853,6 @@ unsafe extern "C" fn resolve_glyph(
     mut gid: *mut u16,
     mut gm: *mut glyph_mapper,
 ) -> i32 {
-    let mut suffix: *mut i8 = 0 as *mut i8;
     assert!(!glyphname.is_null());
     /* Boooo */
     /*
@@ -870,37 +868,39 @@ unsafe extern "C" fn resolve_glyph(
     if (*gm).codetogid.is_null() {
         return -1i32;
     }
-    let name = agl_chop_suffix(glyphname, &mut suffix);
-    let mut error = if name.is_null() {
+    let (name, suffix) = agl_chop_suffix(CStr::from_ptr(glyphname).to_bytes());
+    if let Some(name) = name {
+        let mut error = if agl_name_is_unicode(name.to_bytes()) {
+            let ucv = agl_name_convert_unicode(name.as_ptr());
+            *gid = tt_cmap_lookup((*gm).codetogid, ucv as u32);
+            if *gid as i32 == 0i32 {
+                -1
+            } else {
+                0
+            }
+        } else {
+            findparanoiac(name.as_ptr(), gid, gm)
+        };
+        if error == 0 {
+            if let Some(suffix) = suffix {
+                error = selectglyph(*gid, suffix.as_ptr(), gm, gid);
+                if error != 0 {
+                    warn!(
+                        "Variant \"{}\" for glyph \"{}\" might not be found.",
+                        suffix.display(),
+                        name.display(),
+                    );
+                    warn!("Using glyph name without suffix instead...");
+                    error = 0i32
+                    /* ignore */
+                }
+            }
+        }
+        error
+    } else {
         /* .notdef, .foo */
         -1
-    } else if agl_name_is_unicode(name) {
-        let ucv = agl_name_convert_unicode(name);
-        *gid = tt_cmap_lookup((*gm).codetogid, ucv as u32);
-        if *gid as i32 == 0i32 {
-            -1
-        } else {
-            0
-        }
-    } else {
-        findparanoiac(name, gid, gm)
-    };
-    if error == 0 && !suffix.is_null() {
-        error = selectglyph(*gid, suffix, gm, gid);
-        if error != 0 {
-            warn!(
-                "Variant \"{}\" for glyph \"{}\" might not be found.",
-                CStr::from_ptr(suffix).display(),
-                CStr::from_ptr(name).display(),
-            );
-            warn!("Using glyph name without suffix instead...");
-            error = 0i32
-            /* ignore */
-        }
     }
-    free(suffix as *mut libc::c_void);
-    free(name as *mut libc::c_void);
-    error
 }
 /* Things are complicated. We still need to use PostScript
  * glyph names. But OpenType fonts may not have PS name to

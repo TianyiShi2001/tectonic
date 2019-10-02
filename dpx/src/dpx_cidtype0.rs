@@ -1583,24 +1583,15 @@ unsafe extern "C" fn load_base_CMap(
     CMap_set_CIDSysInfo(cmap, &mut CSI_IDENTITY);
     free(cmap_name as *mut libc::c_void);
     for gid in 1..cffont.num_glyphs as u16 {
-        let mut suffix: *mut i8 = 0 as *mut i8;
         let sid = cff_charsets_lookup_inverse(cffont, gid);
         let glyph = cff_get_string(cffont, sid);
-        let name = agl_chop_suffix(glyph, &mut suffix);
-        if name.is_null() {
-            free(suffix as *mut libc::c_void);
-            free(glyph as *mut libc::c_void);
-        } else if !suffix.is_null() {
-            free(name as *mut libc::c_void);
-            free(suffix as *mut libc::c_void);
-            free(glyph as *mut libc::c_void);
-        } else {
-            if agl_name_is_unicode(name) {
-                let ucv = agl_name_convert_unicode(name);
+        if let (Some(name), None) = agl_chop_suffix(CStr::from_ptr(glyph).to_bytes()) {
+            if agl_name_is_unicode(name.to_bytes()) {
+                let ucv = agl_name_convert_unicode(name.as_ptr());
                 let mut srcCode = ucv.to_be_bytes();
                 CMap_add_cidchar(cmap, srcCode.as_mut_ptr(), 4i32 as size_t, gid);
             } else {
-                let mut agln = agl_lookup_list(name);
+                let mut agln = agl_lookup_list(name.as_ptr());
                 if agln.is_null() {
                     warn!(
                         "Glyph \"{}\" inaccessible (no Unicode mapping)",
@@ -1621,8 +1612,8 @@ unsafe extern "C" fn load_base_CMap(
                     agln = (*agln).alternate
                 }
             }
-            free(name as *mut libc::c_void);
-            free(suffix as *mut libc::c_void);
+            free(glyph as *mut libc::c_void);
+        } else {
             free(glyph as *mut libc::c_void);
         }
     }

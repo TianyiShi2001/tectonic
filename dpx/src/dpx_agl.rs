@@ -29,8 +29,7 @@
 
 use crate::DisplayExt;
 use crate::{info, warn};
-use crate::{streq_ptr, strstartswith};
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 
 use super::dpx_dpxfile::dpx_tt_open;
 use super::dpx_dpxutil::{ht_append_table, ht_clear_table, ht_init_table, ht_lookup_table};
@@ -39,7 +38,7 @@ use super::dpx_mfileio::tt_mfgets;
 use super::dpx_pdfparse::{parse_ident, skip_white};
 use super::dpx_unicode::{UC_UTF16BE_encode_char, UC_is_valid};
 use crate::ttstub_input_close;
-use libc::{free, memcmp, memcpy, strchr, strcmp, strcpy, strlen, strncpy, strtol};
+use libc::{free, memcpy, strchr, strlen, strtol};
 
 pub type __ssize_t = i64;
 pub type size_t = u64;
@@ -63,9 +62,9 @@ pub type hval_free_func = Option<unsafe extern "C" fn(_: *mut libc::c_void) -> (
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct C2RustUnnamed_0 {
-    pub key: *const i8,
-    pub otl_tag: *const i8,
-    pub suffixes: [*const i8; 16],
+    pub key: &'static [u8],
+    pub otl_tag: &'static [u8],
+    pub suffixes: [&'static [u8]; 16],
 }
 /* quasi-hack to get the primary input */
 /* tectonic/core-strutils.h: miscellaneous C string utilities
@@ -93,634 +92,270 @@ unsafe extern "C" fn agl_new_name() -> *mut agl_name {
 unsafe extern "C" fn agl_release_name(mut agln: *mut agl_name) {
     while !agln.is_null() {
         let next = (*agln).alternate;
-        free((*agln).name as *mut libc::c_void);
-        free((*agln).suffix as *mut libc::c_void);
+        let _ = CString::from_raw((*agln).name);
+        if !(*agln).suffix.is_null() {
+            let _ = CString::from_raw((*agln).suffix);
+        }
         (*agln).name = 0 as *mut i8;
         free(agln as *mut libc::c_void);
         agln = next
     }
 }
-#[no_mangle]
-pub unsafe extern "C" fn agl_chop_suffix(
-    mut glyphname: *const i8,
-    mut suffix: *mut *mut i8,
-) -> *mut i8 {
-    let mut name;
-    assert!(!glyphname.is_null() && !suffix.is_null());
-    let mut p = strchr(glyphname, '.' as i32);
-    if !p.is_null() {
-        let len = strlen(glyphname).wrapping_sub(strlen(p)) as i32;
-        if len < 1i32 {
-            name = 0 as *mut i8;
-            *suffix = new((strlen(glyphname) as u32 as u64)
-                .wrapping_mul(::std::mem::size_of::<i8>() as u64) as u32)
-                as *mut i8;
-            strcpy(*suffix, glyphname.offset(1));
+pub unsafe fn agl_chop_suffix(glyphname: &[u8]) -> (Option<CString>, Option<CString>) {
+    let name;
+    let suffix;
+    if let Some(len) = glyphname.iter().position(|&x| x == b'.') {
+        let mut p = &glyphname[len..];
+        if len < 1 {
+            name = None;
+            suffix = Some(CString::new(&glyphname[1..]).unwrap());
         } else {
-            p = p.offset(1);
-            name = new(
-                ((len + 1i32) as u32 as u64).wrapping_mul(::std::mem::size_of::<i8>() as u64)
-                    as u32,
-            ) as *mut i8;
-            strncpy(name, glyphname, len as _);
-            *name.offset(len as isize) = '\u{0}' as i32 as i8;
-            if *p.offset(0) as i32 == '\u{0}' as i32 {
-                *suffix = 0 as *mut i8
+            p = &p[1..];
+            name = Some(CString::new(&glyphname[..len]).unwrap());
+            if p.is_empty() {
+                suffix = None
             } else {
-                *suffix =
-                    new((strlen(p).wrapping_add(1)).wrapping_mul(::std::mem::size_of::<i8>()) as _)
-                        as *mut i8;
-                strcpy(*suffix, p);
+                suffix = Some(CString::new(&glyphname[len+1..]).unwrap());
             }
         }
     } else {
-        name =
-            new((strlen(glyphname).wrapping_add(1)).wrapping_mul(::std::mem::size_of::<i8>()) as _)
-                as *mut i8;
-        strcpy(name, glyphname);
-        *suffix = 0 as *mut i8
+        name = Some(CString::new(glyphname).unwrap());
+        suffix = None
     }
-    name
+    (name, suffix)
 }
-static mut modifiers: [*const i8; 21] = [
-    b"acute\x00" as *const u8 as *const i8,
-    b"breve\x00" as *const u8 as *const i8,
-    b"caron\x00" as *const u8 as *const i8,
-    b"cedilla\x00" as *const u8 as *const i8,
-    b"circumflex\x00" as *const u8 as *const i8,
-    b"dieresis\x00" as *const u8 as *const i8,
-    b"dotaccent\x00" as *const u8 as *const i8,
-    b"grave\x00" as *const u8 as *const i8,
-    b"hungarumlaut\x00" as *const u8 as *const i8,
-    b"macron\x00" as *const u8 as *const i8,
-    b"ogonek\x00" as *const u8 as *const i8,
-    b"ring\x00" as *const u8 as *const i8,
-    b"tilde\x00" as *const u8 as *const i8,
-    b"commaaccent\x00" as *const u8 as *const i8,
-    b"slash\x00" as *const u8 as *const i8,
-    b"ampersand\x00" as *const u8 as *const i8,
-    b"exclam\x00" as *const u8 as *const i8,
-    b"exclamdown\x00" as *const u8 as *const i8,
-    b"question\x00" as *const u8 as *const i8,
-    b"questiondown\x00" as *const u8 as *const i8,
-    0 as *const i8,
+const MODIFIERS: [&[u8]; 20] = [
+    b"acute",
+    b"breve",
+    b"caron",
+    b"cedilla",
+    b"circumflex",
+    b"dieresis",
+    b"dotaccent",
+    b"grave",
+    b"hungarumlaut",
+    b"macron",
+    b"ogonek",
+    b"ring",
+    b"tilde",
+    b"commaaccent",
+    b"slash",
+    b"ampersand",
+    b"exclam",
+    b"exclamdown",
+    b"question",
+    b"questiondown",
 ];
-unsafe extern "C" fn skip_capital(mut p: *mut *const i8, mut endptr: *const i8) -> i32 {
-    let len = endptr.wrapping_offset_from(*p) as i32;
-    if len >= 2i32
-        && (**p as i32 == 'A' as i32 && *(*p).offset(1) as i32 == 'E' as i32
-            || **p as i32 == 'O' as i32 && *(*p).offset(1) as i32 == 'E' as i32)
+fn skip_capital<'a>(p: &'a [u8]) -> (&'a [u8], usize) {
+    if p.starts_with(b"AE") || p.starts_with(b"OE")
     {
-        *p = (*p).offset(2);
-        2
-    } else if len >= 3i32
-        && **p as i32 == 'E' as i32
-        && *(*p).offset(1) as i32 == 't' as i32
-        && *(*p).offset(2) as i32 == 'h' as i32
+        (&p[2..], 2)
+    } else if p.starts_with(b"Eth")
     {
-        *p = (*p).offset(3);
-        3
-    } else if len >= 5i32
-        && **p as i32 == 'T' as i32
-        && *(*p).offset(1) as i32 == 'h' as i32
-        && *(*p).offset(2) as i32 == 'o' as i32
-        && *(*p).offset(3) as i32 == 'r' as i32
-        && *(*p).offset(4) as i32 == 'n' as i32
+        (&p[3..], 3)
+    } else if p.starts_with(b"Thorn")
     {
-        *p = (*p).offset(5);
-        5
-    } else if len >= 1i32 && **p as i32 >= 'A' as i32 && **p as i32 <= 'Z' as i32 {
-        *p = (*p).offset(1);
-        1
+        (&p[5..], 5)
+    } else if p.len() >= 1 {
+        if p[0].is_ascii_uppercase() {
+            (&p[1..], 1)
+        } else {
+            (p, 0)
+        }
     } else {
-        0
+        (p, 0)
     }
 }
-unsafe extern "C" fn skip_modifier(mut p: *mut *const i8, mut endptr: *const i8) -> size_t {
-    let mut slen: size_t = 0i32 as size_t;
-    let len = endptr.wrapping_offset_from(*p) as usize;
-    let mut i = 0;
-    while !modifiers[i].is_null() {
-        if len >= strlen(modifiers[i])
-            && memcmp(
-                *p as *const libc::c_void,
-                modifiers[i] as *const libc::c_void,
-                len,
-            ) == 0
-        {
-            slen = strlen(modifiers[i]) as _;
-            *p = (*p).offset(slen as isize);
+fn skip_modifier<'a>(buf: &'a [u8]) -> (&'a [u8], usize) {
+    let mut slen = 0;
+    for s in MODIFIERS.iter() {
+        if buf.starts_with(s) {
+            slen = s.len();
             break;
-        } else {
-            i += 1;
         }
     }
-    slen
+    (&buf[slen..], slen)
 }
-unsafe extern "C" fn is_smallcap(mut glyphname: *const i8) -> bool {
-    if glyphname.is_null() {
+fn is_smallcap(glyphname: &[u8]) -> bool {
+    if glyphname.is_empty() {
         return false;
     }
-    let mut p = glyphname as *const i8;
-    let len = strlen(glyphname);
-    if len < 6
-        || strcmp(
-            p.offset(len as isize).offset(-5),
-            b"small\x00" as *const u8 as *const i8,
-        ) != 0
+    let len = glyphname.len();
+    if len < 6 || glyphname.ends_with(b"small")
     {
         return false;
     }
-    let endptr = p.offset(len as isize).offset(-5) as *const i8;
-    let len = len.wrapping_sub(5);
-    let mut slen = skip_modifier(&mut p, endptr);
-    if slen == len as _ {
+    let len = len - 5;
+    let p = &glyphname[..len];
+    let (p, slen) = skip_modifier(p);
+    if slen == len {
         return true;
     } else {
-        if slen > 0i32 as u64 {
+        if slen > 0 {
             /* ??? */
             return false;
         }
     }
-    let mut len = len.wrapping_sub(skip_capital(&mut p, endptr) as _) as usize;
+    let (mut p, slen) = skip_capital(p);
+    let mut len = len - slen;
     if len == 0 {
         return true;
         /* Asmall, AEsmall, etc */
     }
     while len > 0 {
         /* allow multiple accent */
-        slen = skip_modifier(&mut p, endptr);
-        if slen == 0i32 as u64 {
+        let (pnew, slen) = skip_modifier(p);
+        p = pnew;
+        if slen == 0 {
             return false;
         }
-        len = len.wrapping_sub(slen as _)
+        len = len - slen;
     }
     true
 }
-static mut var_list: [C2RustUnnamed_0; 14] = [
-    {
-        let mut init = C2RustUnnamed_0 {
-            key: b"small\x00" as *const u8 as *const i8,
-            otl_tag: b"smcp\x00" as *const u8 as *const i8,
-            suffixes: [
-                b"sc\x00" as *const u8 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-            ],
-        };
-        init
+
+const SUFFIX_LIST_MAX: usize = 16;
+
+static mut VAR_LIST: [C2RustUnnamed_0; 14] = [
+    C2RustUnnamed_0 {
+        key: b"small",
+        otl_tag: b"smcp",
+        suffixes: [b"sc", &[], &[], &[], &[], &[], &[], &[], &[], &[], &[], &[], &[], &[], &[], &[]],
     },
-    {
-        let mut init = C2RustUnnamed_0 {
-            key: b"swash\x00" as *const u8 as *const i8,
-            otl_tag: b"swsh\x00" as *const u8 as *const i8,
-            suffixes: [
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-            ],
-        };
-        init
+    C2RustUnnamed_0 {
+        key: b"swash",
+        otl_tag: b"swsh",
+        suffixes: [&[]; SUFFIX_LIST_MAX],
     },
-    {
-        let mut init = C2RustUnnamed_0 {
-            key: b"superior\x00" as *const u8 as *const i8,
-            otl_tag: b"sups\x00" as *const u8 as *const i8,
-            suffixes: [
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-            ],
-        };
-        init
+    C2RustUnnamed_0 {
+        key: b"superior",
+        otl_tag: b"sups",
+        suffixes: [&[]; SUFFIX_LIST_MAX],
     },
-    {
-        let mut init = C2RustUnnamed_0 {
-            key: b"inferior\x00" as *const u8 as *const i8,
-            otl_tag: b"sinf\x00" as *const u8 as *const i8,
-            suffixes: [
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-            ],
-        };
-        init
+    C2RustUnnamed_0 {
+        key: b"inferior",
+        otl_tag: b"sinf",
+        suffixes: [&[]; SUFFIX_LIST_MAX],
     },
-    {
-        let mut init = C2RustUnnamed_0 {
-            key: b"numerator\x00" as *const u8 as *const i8,
-            otl_tag: b"numr\x00" as *const u8 as *const i8,
-            suffixes: [
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-            ],
-        };
-        init
+    C2RustUnnamed_0 {
+        key: b"numerator",
+        otl_tag: b"numr",
+        suffixes: [&[]; SUFFIX_LIST_MAX],
     },
-    {
-        let mut init = C2RustUnnamed_0 {
-            key: b"denominator\x00" as *const u8 as *const i8,
-            otl_tag: b"dnom\x00" as *const u8 as *const i8,
-            suffixes: [
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-            ],
-        };
-        init
+    C2RustUnnamed_0 {
+        key: b"denominator",
+        otl_tag: b"dnom",
+        suffixes: [&[]; SUFFIX_LIST_MAX],
     },
-    {
-        let mut init = C2RustUnnamed_0 {
-            key: b"oldstyle\x00" as *const u8 as *const i8,
-            otl_tag: b"onum\x00" as *const u8 as *const i8,
-            suffixes: [
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-            ],
-        };
-        init
+    C2RustUnnamed_0 {
+        key: b"oldstyle",
+        otl_tag: b"onum",
+        suffixes: [&[]; SUFFIX_LIST_MAX],
     },
-    {
-        let mut init = C2RustUnnamed_0 {
-            key: b"display\x00" as *const u8 as *const i8,
-            otl_tag: 0 as *const i8,
-            suffixes: [
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-            ],
-        };
-        init
+    C2RustUnnamed_0 {
+        key: b"display",
+        otl_tag: &[],
+        suffixes: [&[]; SUFFIX_LIST_MAX],
     },
-    {
-        let mut init = C2RustUnnamed_0 {
-            key: b"text\x00" as *const u8 as *const i8,
-            otl_tag: 0 as *const i8,
-            suffixes: [
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-            ],
-        };
-        init
+    C2RustUnnamed_0 {
+        key: b"text",
+        otl_tag: &[],
+        suffixes: [&[]; SUFFIX_LIST_MAX],
     },
-    {
-        let mut init = C2RustUnnamed_0 {
-            key: b"big\x00" as *const u8 as *const i8,
-            otl_tag: 0 as *const i8,
-            suffixes: [
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-            ],
-        };
-        init
+    C2RustUnnamed_0 {
+        key: b"big",
+        otl_tag: &[],
+        suffixes: [&[]; SUFFIX_LIST_MAX],
     },
-    {
-        let mut init = C2RustUnnamed_0 {
-            key: b"bigg\x00" as *const u8 as *const i8,
-            otl_tag: 0 as *const i8,
-            suffixes: [
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-            ],
-        };
-        init
+    C2RustUnnamed_0 {
+        key: b"bigg",
+        otl_tag: &[],
+        suffixes: [&[]; SUFFIX_LIST_MAX],
     },
-    {
-        let mut init = C2RustUnnamed_0 {
-            key: b"Big\x00" as *const u8 as *const i8,
-            otl_tag: 0 as *const i8,
-            suffixes: [
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-            ],
-        };
-        init
+    C2RustUnnamed_0 {
+        key: b"Big",
+        otl_tag: &[],
+        suffixes: [&[]; SUFFIX_LIST_MAX],
     },
-    {
-        let mut init = C2RustUnnamed_0 {
-            key: b"Bigg\x00" as *const u8 as *const i8,
-            otl_tag: 0 as *const i8,
-            suffixes: [
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-            ],
-        };
-        init
+    C2RustUnnamed_0 {
+        key: b"Bigg",
+        otl_tag: &[],
+        suffixes: [&[]; SUFFIX_LIST_MAX],
     },
-    {
-        let mut init = C2RustUnnamed_0 {
-            key: 0 as *const i8,
-            otl_tag: 0 as *const i8,
-            suffixes: [
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-                0 as *const i8,
-            ],
-        };
-        init
+    C2RustUnnamed_0 {
+        key: &[],
+        otl_tag: &[],
+        suffixes: [&[]; SUFFIX_LIST_MAX],
     },
 ];
 #[no_mangle]
-pub unsafe extern "C" fn agl_suffix_to_otltag(mut suffix: *const i8) -> *const i8 {
+pub unsafe extern "C" fn agl_suffix_to_otltag(suffix: &[u8]) -> Option<&'static [u8]> {
     let mut i = 0;
-    while !var_list[i].key.is_null() {
+    while !VAR_LIST[i].key.is_empty() {
         let mut j = 0;
-        while !var_list[i].suffixes[j].is_null() {
-            if streq_ptr(suffix, var_list[i].suffixes[j]) {
-                return var_list[i].otl_tag;
+        while !VAR_LIST[i].suffixes[j].is_empty() {
+            if suffix == VAR_LIST[i].suffixes[j] {
+                return Some(VAR_LIST[i].otl_tag);
             }
             j += 1
         }
-        if streq_ptr(suffix, var_list[i].key) {
-            return var_list[i].otl_tag;
+        if suffix == VAR_LIST[i].key {
+            return Some(VAR_LIST[i].otl_tag);
         }
-        if !var_list[i].otl_tag.is_null() && streq_ptr(suffix, var_list[i].otl_tag) as i32 != 0 {
-            return var_list[i].otl_tag;
+        if !VAR_LIST[i].otl_tag.is_empty() && suffix == VAR_LIST[i].otl_tag {
+            return Some(VAR_LIST[i].otl_tag);
         }
         i += 1
     }
-    0 as *const i8
+    None
 }
-unsafe extern "C" fn agl_guess_name(mut glyphname: *const i8) -> ssize_t {
+unsafe fn agl_guess_name(glyphname: &[u8]) -> Option<usize> {
     if is_smallcap(glyphname) {
-        return 0i32 as ssize_t;
+        return Some(0);
     }
-    let len = strlen(glyphname);
+    let len = glyphname.len();
     let mut i = 1;
-    while !var_list[i].key.is_null() {
-        if len > strlen(var_list[i].key)
-            && streq_ptr(
-                glyphname
-                    .offset(len as isize)
-                    .offset(-(strlen(var_list[i].key) as isize)),
-                var_list[i].key,
-            ) as i32
-                != 0
+    while !VAR_LIST[i].key.is_empty() {
+        if len > VAR_LIST[i].key.len()
+            && glyphname.ends_with(VAR_LIST[i].key)
         {
-            return i as ssize_t;
+            return Some(i);
         }
         i += 1
     }
-    -1 as ssize_t
+    None
 }
-unsafe extern "C" fn agl_normalized_name(mut glyphname: *mut i8) -> *mut agl_name {
-    if glyphname.is_null() {
+unsafe extern "C" fn agl_normalized_name(glyphname: &[u8]) -> *mut agl_name {
+    if glyphname.is_empty() {
         return 0 as *mut agl_name;
     }
     let agln = agl_new_name();
-    let suffix = strchr(glyphname, '.' as i32);
-    if !suffix.is_null() {
-        let n = strlen(glyphname).wrapping_sub(strlen(suffix)) as i32;
-        if *suffix.offset(1) as i32 != '\u{0}' as i32 {
-            (*agln).suffix = new((strlen(suffix) as u32 as u64)
-                .wrapping_mul(::std::mem::size_of::<i8>() as u64)
-                as u32) as *mut i8;
-            strcpy((*agln).suffix, suffix.offset(1));
+    if let Some(n) = glyphname.iter().position(|&x| x == b'.') {
+        if !glyphname[n+1..].is_empty() {
+            (*agln).suffix = CString::new(&glyphname[n+1..]).unwrap().into_raw();
         }
-        (*agln).name =
-            new(((n + 1i32) as u32 as u64).wrapping_mul(::std::mem::size_of::<i8>() as u64) as u32)
-                as *mut i8;
-        memcpy(
-            (*agln).name as *mut libc::c_void,
-            glyphname as *const libc::c_void,
-            n as _,
-        );
-        *(*agln).name.offset(n as isize) = '\u{0}' as i32 as i8
+        (*agln).name = CString::new(&glyphname[..n]).unwrap().into_raw();
     } else if is_smallcap(glyphname) {
-        let n = strlen(glyphname).wrapping_sub(5) as i32;
-        (*agln).suffix =
-            new((3_u64).wrapping_mul(::std::mem::size_of::<i8>() as u64) as u32) as *mut i8;
-        strcpy((*agln).suffix, b"sc\x00" as *const u8 as *const i8);
-        (*agln).name =
-            new(((n + 1i32) as u32 as u64).wrapping_mul(::std::mem::size_of::<i8>() as u64) as u32)
-                as *mut i8;
-        for i in 0..n {
-            *(*agln).name.offset(i as isize) =
-                (if libc::isupper(*glyphname.offset(i as isize) as _) != 0 {
-                    *glyphname.offset(i as isize) as i32 + 32i32
-                } else {
-                    *glyphname.offset(i as isize) as i32
-                }) as i8;
-        }
-        *(*agln).name.offset(n as isize) = '\u{0}' as i32 as i8
+        let n = glyphname.len() - 5;
+        (*agln).suffix = CString::new(b"sc".as_ref()).unwrap().into_raw();
+        (*agln).name = CString::new(glyphname[..n].to_ascii_lowercase().as_slice()).unwrap().into_raw();
     } else {
-        let var_idx = agl_guess_name(glyphname);
         let n;
-        if var_idx < 0i32 as i64 || var_list[var_idx as usize].key.is_null() {
-            n = strlen(glyphname) as i32
-        } else {
-            n = strlen(glyphname).wrapping_sub(strlen(var_list[var_idx as usize].key)) as i32;
-            if !var_list[var_idx as usize].suffixes[0].is_null() {
-                (*agln).suffix = new((strlen(var_list[var_idx as usize].suffixes[0])
-                    .wrapping_add(1))
-                .wrapping_mul(::std::mem::size_of::<i8>())
-                    as _) as *mut i8;
-                strcpy((*agln).suffix, var_list[var_idx as usize].suffixes[0]);
+        if let Some(var_idx) = agl_guess_name(glyphname) {
+            if VAR_LIST[var_idx].key.is_empty() {
+                n = glyphname.len()
             } else {
-                (*agln).suffix = new((strlen(var_list[var_idx as usize].key).wrapping_add(1))
-                    .wrapping_mul(::std::mem::size_of::<i8>())
-                    as _) as *mut i8;
-                strcpy((*agln).suffix, var_list[var_idx as usize].key);
+                n = glyphname.len() - VAR_LIST[var_idx].key.len();
+                if !VAR_LIST[var_idx].suffixes[0].is_empty() {
+                    (*agln).suffix = CString::new(VAR_LIST[var_idx].suffixes[0]).unwrap().into_raw();
+                } else {
+                    (*agln).suffix = CString::new(VAR_LIST[var_idx].key).unwrap().into_raw();
+                }
             }
+        } else {
+            n = glyphname.len()
         }
-        (*agln).name =
-            new(((n + 1i32) as u32 as u64).wrapping_mul(::std::mem::size_of::<i8>() as u64) as u32)
-                as *mut i8;
-        memcpy(
-            (*agln).name as *mut libc::c_void,
-            glyphname as *const libc::c_void,
-            n as _,
-        );
-        *(*agln).name.offset(n as isize) = '\u{0}' as i32 as i8
+        (*agln).name = CString::new(&glyphname[..n]).unwrap().into_raw();
     }
     agln
 }
@@ -825,7 +460,7 @@ unsafe extern "C" fn agl_load_listfile(mut filename: *const i8, mut is_predef: i
                 );
                 free(name as *mut libc::c_void);
             } else {
-                let agln = agl_normalized_name(name);
+                let agln = agl_normalized_name(CStr::from_ptr(name).to_bytes());
                 (*agln).is_predef = is_predef;
                 (*agln).n_components = n_unicodes;
                 for i in 0..n_unicodes as usize {
@@ -895,40 +530,31 @@ pub unsafe extern "C" fn agl_lookup_list(mut glyphname: *const i8) -> *mut agl_n
         strlen(glyphname) as i32,
     ) as *mut agl_name
 }
-#[no_mangle]
-pub unsafe extern "C" fn agl_name_is_unicode(mut glyphname: *const i8) -> bool {
-    if glyphname.is_null() {
+pub fn agl_name_is_unicode(glyphname: &[u8]) -> bool {
+    if glyphname.is_empty() {
         return false;
     }
-    let suffix = strchr(glyphname, '.' as i32);
-    let len = if !suffix.is_null() {
-        suffix.wrapping_offset_from(glyphname) as i64 as size_t
-    } else {
-        strlen(glyphname) as _
-    };
+    let len = glyphname.iter().position(|&x| x == b'.').unwrap_or(glyphname.len());
     /*
      * uni02ac is invalid glyph name and mapped to th empty string.
      */
-    if len >= 7i32 as u64
-        && len.wrapping_sub(3i32 as u64).wrapping_rem(4i32 as u64) == 0i32 as u64
-        && !strstartswith(glyphname, b"uni\x00" as *const u8 as *const i8).is_null()
+    if len >= 7 && (len - 3) % 4 == 0
+        && glyphname.starts_with(b"uni")
     {
-        let c = *glyphname.offset(3);
+        let c = glyphname[3];
         /*
          * Check if the 4th character is uppercase hexadecimal digit.
          * "union" should not be treated as Unicode glyph name.
          */
-        if libc::isdigit(c as _) != 0 || c as i32 >= 'A' as i32 && c as i32 <= 'F' as i32 {
+        if c.is_ascii_digit() || c >= b'A' && c <= b'F' {
             return true;
         } else {
             return false;
         }
     } else {
-        if len <= 7i32 as u64 && len >= 5i32 as u64 && *glyphname.offset(0) as i32 == 'u' as i32 {
-            for i in 1..len - 1 {
-                let c = *glyphname.offset(i as isize);
-                if libc::isdigit(c as _) == 0 && ((c as i32) < 'A' as i32 || c as i32 > 'F' as i32)
-                {
+        if len <= 7 && len >= 5 && glyphname[0] == b'u' {
+            for c in &glyphname[1..(len - 1)] {
+                if !c.is_ascii_digit() && (*c < b'A' || *c > b'F') {
                     return false;
                 }
             }
@@ -939,7 +565,7 @@ pub unsafe extern "C" fn agl_name_is_unicode(mut glyphname: *const i8) -> bool {
 }
 #[no_mangle]
 pub unsafe extern "C" fn agl_name_convert_unicode(mut glyphname: *const i8) -> i32 {
-    if !agl_name_is_unicode(glyphname) {
+    if !agl_name_is_unicode(CStr::from_ptr(glyphname).to_bytes()) {
         return -1i32;
     }
     if strlen(glyphname) > 7 && *glyphname.offset(7) as i32 != '.' as i32 {
@@ -979,44 +605,40 @@ pub unsafe extern "C" fn agl_name_convert_unicode(mut glyphname: *const i8) -> i
     }
     ucv
 }
-unsafe extern "C" fn xtol(mut start: *const i8, mut len: i32) -> i32 {
+
+fn xtol(mut buf: &[u8]) -> i32 {
     let mut v: i32 = 0i32;
-    loop {
-        let fresh1 = len;
-        len = len - 1;
-        if !(fresh1 > 0i32) {
-            break;
-        }
-        v <<= 4i32;
-        if libc::isdigit(*start as _) != 0 {
-            v += *start as i32 - '0' as i32
-        } else if *start as i32 >= 'A' as i32 && *start as i32 <= 'F' as i32 {
-            v += *start as i32 - 'A' as i32 + 10i32
+    for &b in buf {
+        v <<= 4;
+        if b.is_ascii_digit() {
+            v += (b - b'0') as i32;
+        } else if b >= b'A' && b <= b'F' {
+            v += (b - b'A' + 10) as i32;
         } else {
-            return -1i32;
+            return -1;
         }
-        start = start.offset(1)
     }
     v
 }
+
 unsafe extern "C" fn put_unicode_glyph(
-    mut name: *const i8,
+    name: &[u8],
     mut dstpp: *mut *mut u8,
     mut limptr: *mut u8,
 ) -> i32 {
     let mut len = 0;
     let mut p = name;
-    if *p.offset(1) as i32 != 'n' as i32 {
-        p = p.offset(1);
-        let ucv = xtol(p, strlen(p) as i32);
-        len = (len as u64).wrapping_add(UC_UTF16BE_encode_char(ucv, dstpp, limptr)) as i32 as i32
+    if p[1] != b'n' {
+        p = &p[1..];
+        let ucv = xtol(p);
+        len = ((len as u64) + UC_UTF16BE_encode_char(ucv, dstpp, limptr)) as i32;
     } else {
-        p = p.offset(3);
-        while *p as i32 != '\u{0}' as i32 {
-            let ucv = xtol(p, 4i32);
+        p = &p[3..];
+        while !p.is_empty() {
+            let ucv = xtol(&p[..4]);
             len =
-                (len as u64).wrapping_add(UC_UTF16BE_encode_char(ucv, dstpp, limptr)) as i32 as i32;
-            p = p.offset(4)
+                ((len as u64) + UC_UTF16BE_encode_char(ucv, dstpp, limptr)) as i32;
+            p = &p[4..];
         }
     }
     len
@@ -1059,23 +681,25 @@ pub unsafe extern "C" fn agl_sput_UTF16BE(
             }
         }
         let sub_len = delim.wrapping_offset_from(p) as i64 as i32;
-        let name = new(((sub_len + 1i32) as u32 as u64)
+        let name_p = new(((sub_len + 1i32) as u32 as u64)
             .wrapping_mul(::std::mem::size_of::<i8>() as u64) as u32) as *mut i8;
         memcpy(
-            name as *mut libc::c_void,
+            name_p as *mut libc::c_void,
             p as *const libc::c_void,
             sub_len as _,
         );
-        *name.offset(sub_len as isize) = '\u{0}' as i32 as i8;
-        if agl_name_is_unicode(name) {
-            let sub_len = put_unicode_glyph(name, dstpp, limptr);
+        *name_p.offset(sub_len as isize) = '\u{0}' as i32 as i8;
+        let name = CStr::from_ptr(name_p).to_owned();
+        free(name_p as *mut libc::c_void);
+        if agl_name_is_unicode(name.to_bytes()) {
+            let sub_len = put_unicode_glyph(name.to_bytes(), dstpp, limptr);
             if sub_len > 0i32 {
                 len += sub_len
             } else {
                 count += 1
             }
         } else {
-            let mut agln1 = agl_lookup_list(name);
+            let mut agln1 = agl_lookup_list(name.as_ptr());
             if agln1.is_null()
                 || (*agln1).n_components == 1i32
                     && ((*agln1).unicodes[0] as i64 >= 0xe000
@@ -1085,12 +709,12 @@ pub unsafe extern "C" fn agl_sput_UTF16BE(
                         || (*agln1).unicodes[0] as i64 >= 0x100000
                             && (*agln1).unicodes[0] as i64 <= 0x10fffd)
             {
-                let agln0 = agl_normalized_name(name);
+                let agln0 = agl_normalized_name(name.to_bytes());
                 if !agln0.is_null() {
                     if verbose > 1i32 && !(*agln0).suffix.is_null() {
                         warn!(
                             "agl: fix {} --> {}.{}",
-                            CStr::from_ptr(name).display(),
+                            name.display(),
                             CStr::from_ptr((*agln0).name).display(),
                             CStr::from_ptr((*agln0).suffix).display(),
                         );
@@ -1111,13 +735,12 @@ pub unsafe extern "C" fn agl_sput_UTF16BE(
                 if verbose != 0 {
                     warn!(
                         "No Unicode mapping for glyph name \"{}\" found.",
-                        CStr::from_ptr(name).display()
+                        name.display()
                     )
                 }
                 count += 1
             }
         }
-        free(name as *mut libc::c_void);
         p = delim.offset(1)
     }
     if !fail_count.is_null() {
@@ -1156,41 +779,39 @@ pub unsafe extern "C" fn agl_get_unicodes(
             }
         }
         let sub_len = delim.wrapping_offset_from(p) as i32;
-        let name = new(((sub_len + 1i32) as u32 as u64)
+        let name_p = new(((sub_len + 1i32) as u32 as u64)
             .wrapping_mul(::std::mem::size_of::<i8>() as u64) as u32) as *mut i8;
         memcpy(
-            name as *mut libc::c_void,
+            name_p as *mut libc::c_void,
             p as *const libc::c_void,
             sub_len as _,
         );
-        *name.offset(sub_len as isize) = '\u{0}' as i32 as i8;
-        if agl_name_is_unicode(name) {
-            p = name;
-            if *p.offset(1) as i32 != 'n' as i32 {
+        *name_p.offset(sub_len as isize) = '\u{0}' as i32 as i8;
+        let name = CStr::from_ptr(name_p).to_owned();
+        free(name_p as *mut libc::c_void);
+        if agl_name_is_unicode(name.to_bytes()) {
+            let mut p = name.to_bytes();
+            if p[1] != b'n' {
                 /* uXXXXXXXX */
                 if count >= max_unicodes {
-                    free(name as *mut libc::c_void);
                     return -1i32;
                 }
-                p = p.offset(1);
-                let fresh2 = count;
-                count = count + 1;
-                *unicodes.offset(fresh2 as isize) = xtol(p, strlen(p) as i32)
+                p = &p[1..];
+                *unicodes.offset(count as isize) = xtol(p);
+                count += 1;
             } else {
-                p = p.offset(3);
-                while *p as i32 != '\u{0}' as i32 {
+                p = &p[3..];
+                while !p.is_empty() {
                     if count >= max_unicodes {
-                        free(name as *mut libc::c_void);
                         return -1i32;
                     }
-                    let fresh3 = count;
-                    count = count + 1;
-                    *unicodes.offset(fresh3 as isize) = xtol(p, 4i32);
-                    p = p.offset(4)
+                    *unicodes.offset(count as isize) = xtol(&p[..4]);
+                    count += 1;
+                    p = &p[4..];
                 }
             }
         } else {
-            let mut agln1 = agl_lookup_list(name);
+            let mut agln1 = agl_lookup_list(name.as_ptr());
             if agln1.is_null()
                 || (*agln1).n_components == 1i32
                     && ((*agln1).unicodes[0] as i64 >= 0xe000
@@ -1200,12 +821,12 @@ pub unsafe extern "C" fn agl_get_unicodes(
                         || (*agln1).unicodes[0] as i64 >= 0x100000
                             && (*agln1).unicodes[0] as i64 <= 0x10fffd)
             {
-                let mut agln0 = agl_normalized_name(name);
+                let mut agln0 = agl_normalized_name(name.to_bytes());
                 if !agln0.is_null() {
                     if verbose > 1i32 && !(*agln0).suffix.is_null() {
                         warn!(
                             "agl: fix {} --> {}.{}",
-                            CStr::from_ptr(name).display(),
+                            name.display(),
                             CStr::from_ptr((*agln0).name).display(),
                             CStr::from_ptr((*agln0).suffix).display(),
                         );
@@ -1216,7 +837,6 @@ pub unsafe extern "C" fn agl_get_unicodes(
             }
             if !agln1.is_null() {
                 if count + (*agln1).n_components > max_unicodes {
-                    free(name as *mut libc::c_void);
                     return -1i32;
                 }
                 for i in 0..(*agln1).n_components {
@@ -1228,14 +848,12 @@ pub unsafe extern "C" fn agl_get_unicodes(
                 if verbose > 1i32 {
                     warn!(
                         "No Unicode mapping for glyph name \"{}\" found.",
-                        CStr::from_ptr(name).display()
+                        name.display()
                     )
                 }
-                free(name as *mut libc::c_void);
                 return -1i32;
             }
         }
-        free(name as *mut libc::c_void);
         p = delim.offset(1)
     }
     count
