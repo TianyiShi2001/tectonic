@@ -1708,17 +1708,17 @@ pub unsafe extern "C" fn otf_load_Unicode_CMap(
         gsub_vert = otl_gsub_new();
         if otl_gsub_add_feat(
             gsub_vert,
-            b"*\x00" as *const u8 as *const i8,
-            b"*\x00" as *const u8 as *const i8,
-            b"vrt2\x00" as *const u8 as *const i8,
+            b"*",
+            b"*",
+            b"vrt2",
             sfont,
         ) < 0i32
         {
             if otl_gsub_add_feat(
                 gsub_vert,
-                b"*\x00" as *const u8 as *const i8,
-                b"*\x00" as *const u8 as *const i8,
-                b"vert\x00" as *const u8 as *const i8,
+                b"*",
+                b"*",
+                b"vert",
                 sfont,
             ) < 0i32
             {
@@ -1728,17 +1728,17 @@ pub unsafe extern "C" fn otf_load_Unicode_CMap(
             } else {
                 otl_gsub_select(
                     gsub_vert,
-                    b"*\x00" as *const u8 as *const i8,
-                    b"*\x00" as *const u8 as *const i8,
-                    b"vert\x00" as *const u8 as *const i8,
+                    b"*",
+                    b"*",
+                    b"vert",
                 );
             }
         } else {
             otl_gsub_select(
                 gsub_vert,
-                b"*\x00" as *const u8 as *const i8,
-                b"*\x00" as *const u8 as *const i8,
-                b"vrt2\x00" as *const u8 as *const i8,
+                b"*",
+                b"*",
+                b"vrt2",
             );
         }
     } else {

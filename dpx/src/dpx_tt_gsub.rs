@@ -28,20 +28,19 @@
 )]
 
 use crate::DisplayExt;
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 
 use super::dpx_numbers::{
     tt_get_signed_byte, tt_get_signed_pair, tt_get_unsigned_pair, tt_get_unsigned_quad,
 };
 use super::dpx_sfnt::sfnt_find_table_pos;
 use crate::mfree;
-use crate::streq_ptr;
 use crate::{info, warn};
 
 use super::dpx_mem::{new, renew};
 use super::dpx_otl_opt::{otl_match_optrule, otl_new_opt, otl_parse_optstring, otl_release_opt};
 use crate::ttstub_input_seek;
-use libc::{free, memset, strchr, strcpy, strlen, strncpy};
+use libc::{free, memset};
 
 pub type __ssize_t = i64;
 pub type size_t = u64;
@@ -1225,9 +1224,9 @@ unsafe extern "C" fn clear_chain(mut gsub_list: *mut otl_gsub) {
 #[no_mangle]
 pub unsafe extern "C" fn otl_gsub_add_feat(
     mut gsub_list: *mut otl_gsub,
-    mut script: *const i8,
-    mut language: *const i8,
-    mut feature: *const i8,
+    mut script: &[u8],
+    mut language: &[u8],
+    mut feature: &[u8],
     mut sfont: *mut sfnt,
 ) -> i32 {
     if (*gsub_list).num_gsubs > 32i32 {
@@ -1236,9 +1235,9 @@ pub unsafe extern "C" fn otl_gsub_add_feat(
     let mut i = 0;
     while i < (*gsub_list).num_gsubs {
         let gsub = &mut *(*gsub_list).gsubs.as_mut_ptr().offset(i as isize) as *mut otl_gsub_tab;
-        if streq_ptr(script, (*gsub).script) as i32 != 0
-            && streq_ptr(language, (*gsub).language) as i32 != 0
-            && streq_ptr(feature, (*gsub).feature) as i32 != 0
+        if script == CStr::from_ptr((*gsub).script).to_bytes()
+            && language == CStr::from_ptr((*gsub).language).to_bytes()
+            && feature == CStr::from_ptr((*gsub).feature).to_bytes()
         {
             (*gsub_list).select = i;
             return 0i32;
@@ -1246,25 +1245,16 @@ pub unsafe extern "C" fn otl_gsub_add_feat(
         i += 1
     }
     let gsub = &mut *(*gsub_list).gsubs.as_mut_ptr().offset(i as isize) as *mut otl_gsub_tab;
-    (*gsub).script =
-        new((strlen(script).wrapping_add(1)).wrapping_mul(::std::mem::size_of::<i8>()) as _)
-            as *mut i8;
-    strcpy((*gsub).script, script);
-    (*gsub).language =
-        new((strlen(language).wrapping_add(1)).wrapping_mul(::std::mem::size_of::<i8>()) as _)
-            as *mut i8;
-    strcpy((*gsub).language, language);
-    (*gsub).feature =
-        new((strlen(feature).wrapping_add(1)).wrapping_mul(::std::mem::size_of::<i8>()) as _)
-            as *mut i8;
-    strcpy((*gsub).feature, feature);
+    (*gsub).script = CString::new(script).unwrap().into_raw();
+    (*gsub).language = CString::new(language).unwrap().into_raw();
+    (*gsub).feature = CString::new(feature).unwrap().into_raw();
     if verbose > 0i32 {
         info!("\n");
         info!(
             "otl_gsub>> Reading \"{}.{}.{}\"...\n",
-            CStr::from_ptr(script).display(),
-            CStr::from_ptr(language).display(),
-            CStr::from_ptr(feature).display(),
+            CString::new(script).unwrap().display(),
+            CString::new(language).unwrap().display(),
+            CString::new(feature).unwrap().display(),
         );
     }
     let retval = otl_gsub_read_feat(gsub, sfont);
@@ -1275,70 +1265,57 @@ pub unsafe extern "C" fn otl_gsub_add_feat(
         if verbose > 0i32 {
             info!("otl_gsub>> Failed\n");
         }
-        free((*gsub).script as *mut libc::c_void);
-        free((*gsub).language as *mut libc::c_void);
-        free((*gsub).feature as *mut libc::c_void);
+        let _ = CString::from_raw((*gsub).script);
+        let _ = CString::from_raw((*gsub).language);
+        let _ = CString::from_raw((*gsub).feature);
     }
     retval
 }
-unsafe extern "C" fn scan_otl_tag(
-    mut otl_tags: *const i8,
-    mut endptr: *const i8,
-    mut script: *mut i8,
-    mut language: *mut i8,
-    mut feature: *mut i8,
-) -> i32 {
-    assert!(!script.is_null() && !language.is_null() && !feature.is_null());
-    if otl_tags.is_null() || otl_tags >= endptr {
-        return -1i32;
+fn scan_otl_tag(
+    mut otl_tags: &[u8],
+) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>), ()> {
+    let mut script;
+    let mut language = vec![b' '; 4];
+    if otl_tags.is_empty() {
+        return Err(());
     }
-    memset(script as *mut libc::c_void, ' ' as i32, 4);
-    *script.offset(4) = 0_i8;
-    memset(language as *mut libc::c_void, ' ' as i32, 4);
-    *language.offset(4) = 0_i8;
-    memset(feature as *mut libc::c_void, ' ' as i32, 4);
-    *feature.offset(4) = 0_i8;
     /* First parse otl_tags variable */
     let mut p = otl_tags;
-    let mut period = strchr(p, '.' as i32) as *const i8;
-    if !period.is_null() && period < endptr {
+    
+    if let Some(slen) = p.iter().position(|&x| x == b'.') {
         /* Format scrp.lang.feat */
-        if period < p.offset(5) {
-            strncpy(script, p, period.wrapping_offset_from(p) as _);
+        if slen < 5 {
+            script = Vec::from(&p[..slen]);
         } else {
-            warn!(
-                "Invalid OTL script tag found: {}",
-                CStr::from_ptr(p).display(),
-            );
-            return -1i32;
+            warn!("Invalid OTL script tag found: {}", p.display());
+            return Err(());
         }
-        p = period.offset(1);
-        period = strchr(p, '.' as i32);
-        if !period.is_null() && period < endptr {
+        p = &p[slen+1..];
+        if let Some(llen) = p.iter().position(|&x| x == b'.') {
             /* Now lang part */
-            if period < p.offset(5) {
-                strncpy(language, p, period.wrapping_offset_from(p) as _);
+            if llen < 5 {
+                language = Vec::from(&p[..llen]);
             } else {
                 warn!(
                     "Invalid OTL lanuage tag found: {}",
-                    CStr::from_ptr(p).display(),
+                    p.display(),
                 );
-                return -1i32;
+                return Err(());
             }
-            p = period.offset(1)
+            p = &p[llen+1..];
         }
     } else {
-        strcpy(script, b"*\x00" as *const u8 as *const i8);
-        strcpy(language, b"*\x00" as *const u8 as *const i8);
+        script = vec![b'*'];
+        language = vec![b'*'];
     }
     /* Finally feature */
-    if p.offset(4) <= endptr {
-        strncpy(feature, p, endptr.wrapping_offset_from(p) as _);
+    let feature = if p.len() >= 4 {
+        Vec::from(p)
     } else {
         warn!("No valid OTL feature tag specified.");
-        return -1i32;
-    }
-    0i32
+        return Err(());
+    };
+    Ok((script, language, feature))
 }
 #[no_mangle]
 pub unsafe extern "C" fn otl_gsub_release(mut gsub_list: *mut otl_gsub) {
@@ -1347,9 +1324,9 @@ pub unsafe extern "C" fn otl_gsub_release(mut gsub_list: *mut otl_gsub) {
     }
     for i in 0..(*gsub_list).num_gsubs {
         let gsub = &mut *(*gsub_list).gsubs.as_mut_ptr().offset(i as isize) as *mut otl_gsub_tab;
-        free((*gsub).script as *mut libc::c_void);
-        free((*gsub).language as *mut libc::c_void);
-        free((*gsub).feature as *mut libc::c_void);
+        let _ = CString::from_raw((*gsub).script);
+        let _ = CString::from_raw((*gsub).language);
+        let _ = CString::from_raw((*gsub).feature);
         for j in 0..(*gsub).num_subtables {
             let subtab = &mut *(*gsub).subtables.offset(j as isize) as *mut otl_gsub_subtab;
             match (*subtab).LookupType as i32 {
@@ -1449,15 +1426,15 @@ pub unsafe extern "C" fn otl_gsub_apply_lig(
 }
 unsafe extern "C" fn gsub_find(
     mut gsub_list: *mut otl_gsub,
-    mut script: *const i8,
-    mut language: *const i8,
-    mut feature: *const i8,
+    script: &[u8],
+    language: &[u8],
+    feature: &[u8],
 ) -> i32 {
     for i in 0..(*gsub_list).num_gsubs {
         let gsub = &mut *(*gsub_list).gsubs.as_mut_ptr().offset(i as isize) as *mut otl_gsub_tab;
-        if streq_ptr((*gsub).script, script) as i32 != 0
-            && streq_ptr((*gsub).language, language) as i32 != 0
-            && streq_ptr((*gsub).feature, feature) as i32 != 0
+        if CStr::from_ptr((*gsub).script).to_bytes() == script
+            && CStr::from_ptr((*gsub).language).to_bytes() == language
+            && CStr::from_ptr((*gsub).feature).to_bytes() == feature
         {
             return i;
         }
@@ -1467,9 +1444,9 @@ unsafe extern "C" fn gsub_find(
 #[no_mangle]
 pub unsafe extern "C" fn otl_gsub_select(
     mut gsub_list: *mut otl_gsub,
-    mut script: *const i8,
-    mut language: *const i8,
-    mut feature: *const i8,
+    mut script: &[u8],
+    mut language: &[u8],
+    mut feature: &[u8],
 ) -> i32 {
     (*gsub_list).select = gsub_find(gsub_list, script, language, feature);
     (*gsub_list).select
@@ -1480,30 +1457,14 @@ pub unsafe extern "C" fn otl_gsub_set_chain(
     mut otl_tags: *const i8,
 ) -> i32 {
     let mut prev: *mut gsub_entry = 0 as *mut gsub_entry;
-    let mut script: [i8; 5] = [0; 5];
-    let mut language: [i8; 5] = [0; 5];
-    let mut feature: [i8; 5] = [0; 5];
     clear_chain(gsub_list);
-    let endptr = otl_tags.offset(strlen(otl_tags) as isize);
-    let mut p = otl_tags;
-    while p < endptr {
-        let mut nextptr = strchr(p, ':' as i32) as *const i8;
-        if nextptr.is_null() {
-            nextptr = endptr
-        }
-        if scan_otl_tag(
-            p,
-            nextptr,
-            script.as_mut_ptr(),
-            language.as_mut_ptr(),
-            feature.as_mut_ptr(),
-        ) >= 0i32
-        {
+    for p in CStr::from_ptr(otl_tags).to_bytes().split(|&c| c == b':') {
+        if let Ok((script, language, feature)) = scan_otl_tag(p) {
             let idx = gsub_find(
                 gsub_list,
-                script.as_mut_ptr(),
-                language.as_mut_ptr(),
-                feature.as_mut_ptr(),
+                &script,
+                &language,
+                &feature,
             );
             if idx >= 0i32 && idx <= (*gsub_list).num_gsubs {
                 let entry =
@@ -1519,8 +1480,6 @@ pub unsafe extern "C" fn otl_gsub_set_chain(
                 prev = entry
             }
         }
-        nextptr = nextptr.offset(1);
-        p = nextptr
     }
     if !prev.is_null() {
         (*prev).next = 0 as *mut gsub_entry
@@ -1533,46 +1492,28 @@ pub unsafe extern "C" fn otl_gsub_add_feat_list(
     mut otl_tags: *const i8,
     mut sfont: *mut sfnt,
 ) -> i32 {
-    let mut script: [i8; 5] = [0; 5];
-    let mut language: [i8; 5] = [0; 5];
-    let mut feature: [i8; 5] = [0; 5];
     if gsub_list.is_null() || otl_tags.is_null() || sfont.is_null() {
         return -1i32;
     }
     clear_chain(gsub_list);
-    let endptr = otl_tags.offset(strlen(otl_tags) as isize);
-    let mut p = otl_tags;
-    while p < endptr {
-        let mut nextptr = strchr(p, ':' as i32) as *const i8;
-        if nextptr.is_null() {
-            nextptr = endptr
-        }
-        if scan_otl_tag(
-            p,
-            nextptr,
-            script.as_mut_ptr(),
-            language.as_mut_ptr(),
-            feature.as_mut_ptr(),
-        ) >= 0i32
-        {
+    for p in CStr::from_ptr(otl_tags).to_bytes().split(|&c| c == b':') {
+        if let Ok((script, language, feature)) = scan_otl_tag(p) {
             let idx = gsub_find(
                 gsub_list,
-                script.as_mut_ptr(),
-                language.as_mut_ptr(),
-                feature.as_mut_ptr(),
+                &script,
+                &language,
+                &feature,
             );
             if idx < 0i32 {
                 otl_gsub_add_feat(
                     gsub_list,
-                    script.as_mut_ptr(),
-                    language.as_mut_ptr(),
-                    feature.as_mut_ptr(),
+                    &script,
+                    &language,
+                    &feature,
                     sfont,
                 );
             }
         }
-        nextptr = nextptr.offset(1);
-        p = nextptr
     }
     0i32
 }

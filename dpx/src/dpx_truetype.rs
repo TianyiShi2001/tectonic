@@ -480,15 +480,15 @@ unsafe extern "C" fn agl_decompose_glyphname(
     }
     n
 }
-unsafe extern "C" fn select_gsub(mut feat: *const i8, mut gm: *mut glyph_mapper) -> i32 {
-    if feat.is_null() || *feat as i32 == 0i32 || gm.is_null() || (*gm).gsub.is_null() {
+unsafe extern "C" fn select_gsub(feat: &[u8], mut gm: *mut glyph_mapper) -> i32 {
+    if feat.is_empty() || gm.is_null() || (*gm).gsub.is_null() {
         return -1i32;
     }
     /* First treat as is */
     let idx = otl_gsub_select(
         (*gm).gsub,
-        b"*\x00" as *const u8 as *const i8,
-        b"*\x00" as *const u8 as *const i8,
+        b"*",
+        b"*",
         feat,
     );
     if idx >= 0i32 {
@@ -497,21 +497,21 @@ unsafe extern "C" fn select_gsub(mut feat: *const i8, mut gm: *mut glyph_mapper)
     if verbose > 1i32 {
         info!(
             "\ntrutype>> Try loading OTL GSUB for \"*.*.{}\"...",
-            CStr::from_ptr(feat).display()
+            feat.display()
         );
     }
     let error = otl_gsub_add_feat(
         (*gm).gsub,
-        b"*\x00" as *const u8 as *const i8,
-        b"*\x00" as *const u8 as *const i8,
+        b"*",
+        b"*",
         feat,
         (*gm).sfont,
     );
     if error == 0 {
         let idx = otl_gsub_select(
             (*gm).gsub,
-            b"*\x00" as *const u8 as *const i8,
-            b"*\x00" as *const u8 as *const i8,
+            b"*",
+            b"*",
             feat,
         );
         return if idx >= 0i32 { 0i32 } else { -1i32 };
@@ -539,7 +539,7 @@ unsafe extern "C" fn selectglyph(
     let r = agl_suffix_to_otltag(s); /* 'suffix' may represent feature tag. */
     if !r.is_null() {
         /* We found feature tag for 'suffix'. */
-        error = select_gsub(r, gm); /* no fallback for this */
+        error = select_gsub(CStr::from_ptr(r).to_bytes(), gm); /* no fallback for this */
         if error == 0 {
             error = otl_gsub_apply((*gm).gsub, &mut in_0)
         }
@@ -550,7 +550,7 @@ unsafe extern "C" fn selectglyph(
         if strlen(s) > 4 {
             error = -1i32
         } else if strlen(s) == 4 {
-            error = select_gsub(s, gm)
+            error = select_gsub(CStr::from_ptr(s).to_bytes(), gm)
         } else {
             /* Uh */
             /* less than 4. pad ' '. */
@@ -561,7 +561,7 @@ unsafe extern "C" fn selectglyph(
                 s as *const libc::c_void,
                 strlen(s),
             );
-            error = select_gsub(t.as_mut_ptr(), gm)
+            error = select_gsub(CStr::from_ptr(t.as_mut_ptr()).to_bytes(), gm)
         }
         if error == 0 {
             /* 'suffix' represents feature tag. */
@@ -589,7 +589,7 @@ unsafe extern "C" fn selectglyph(
                         s as *const libc::c_void,
                         strlen(s),
                     );
-                    error = select_gsub(s, gm);
+                    error = select_gsub(CStr::from_ptr(s).to_bytes(), gm);
                     if error == 0 {
                         error = otl_gsub_apply_alt((*gm).gsub, n as u16, &mut in_0 as *mut u16)
                     }
@@ -620,7 +620,7 @@ unsafe extern "C" fn composeglyph(
     let mut error = if feat.is_null() || *feat.offset(0) as i32 == '\u{0}' as i32 {
         /* meaning "Unknown" */
         select_gsub(
-            b"(?lig|lig?|?cmp|cmp?|frac|afrc)\x00" as *const u8 as *const i8,
+            b"(?lig|lig?|?cmp|cmp?|frac|afrc)",
             gm,
         )
     } else if strlen(feat) > 4 {
@@ -631,7 +631,7 @@ unsafe extern "C" fn composeglyph(
             feat as *const libc::c_void,
             strlen(feat),
         );
-        select_gsub(t.as_mut_ptr(), gm)
+        select_gsub(CStr::from_ptr(t.as_mut_ptr()).to_bytes(), gm)
     };
     if error == 0 {
         error = otl_gsub_apply_lig((*gm).gsub, glyphs, n_glyphs as u16, gid)
