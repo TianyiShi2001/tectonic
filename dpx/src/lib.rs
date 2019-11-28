@@ -75,6 +75,13 @@ impl<'a> DisplayExt for &'a std::ffi::CStr {
     }
 }
 
+impl<'a> DisplayExt for &'a [u8] {
+    type Adapter = std::borrow::Cow<'a, str>;
+    fn display(self) -> Self::Adapter {
+        String::from_utf8_lossy(self)
+    }
+}
+
 pub(crate) fn isblank(c: libc::c_int) -> libc::c_int {
     (c == ' ' as _ || c == '\t' as _) as _
 }

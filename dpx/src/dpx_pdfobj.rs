@@ -38,7 +38,6 @@ use crate::{info, warn};
 use std::ffi::CStr;
 
 use super::dpx_dpxutil::{ht_append_table, ht_clear_table, ht_init_table, ht_lookup_table};
-use super::dpx_error::dpx_message;
 use super::dpx_mem::{new, renew};
 use super::dpx_mfileio::{tt_mfgets, work_buffer};
 use super::dpx_pdfdev::pdf_sprint_number;
@@ -3025,8 +3024,8 @@ pub unsafe extern "C" fn pdf_release_obj(mut object: *mut pdf_obj) {
         || (*object).typ > 10i32
         || (*object).refcount <= 0_u32
     {
-        dpx_message(
-            b"\npdf_release_obj: object=%p, type=%d, refcount=%d\n\x00" as *const u8 as *const i8,
+        info!(
+            "\npdf_release_obj: object={:p}, type={}, refcount={}\n",
             object,
             (*object).typ,
             (*object).refcount,

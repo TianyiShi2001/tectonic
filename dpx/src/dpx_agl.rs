@@ -34,7 +34,6 @@ use std::ffi::CStr;
 
 use super::dpx_dpxfile::dpx_tt_open;
 use super::dpx_dpxutil::{ht_append_table, ht_clear_table, ht_init_table, ht_lookup_table};
-use super::dpx_error::dpx_warning;
 use super::dpx_mem::new;
 use super::dpx_mfileio::tt_mfgets;
 use super::dpx_pdfparse::{parse_ident, skip_white};
@@ -955,10 +954,10 @@ pub unsafe extern "C" fn agl_name_convert_unicode(mut glyphname: *const i8) -> i
     let mut ucv = 0;
     while *p as i32 != '\u{0}' as i32 && *p as i32 != '.' as i32 {
         if libc::isdigit(*p as _) == 0 && ((*p as i32) < 'A' as i32 || *p as i32 > 'F' as i32) {
-            dpx_warning(
-                b"Invalid char %c in Unicode glyph name %s.\x00" as *const u8 as *const i8,
-                *p as i32,
-                glyphname,
+            warn!(
+                "Invalid char {} in Unicode glyph name {}.",
+                char::from(*p as u8),
+                CStr::from_ptr(glyphname).display(),
             );
             return -1i32;
         }

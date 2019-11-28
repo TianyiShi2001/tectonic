@@ -32,7 +32,6 @@ use crate::warn;
 use crate::DisplayExt;
 use std::ffi::CStr;
 
-use super::dpx_error::dpx_warning;
 use super::dpx_mem::new;
 use libc::{free, memcpy, memset, strlen};
 
@@ -188,9 +187,9 @@ unsafe extern "C" fn parse_expr(mut pp: *mut *const i8, mut endptr: *const i8) -
                         } else if **pp as i32 == '_' as i32 {
                             (*curr).data[i as usize] = ' ' as i32 as i8
                         } else {
-                            dpx_warning(
-                                b"Invalid char in tag: %c\n\x00" as *const u8 as *const i8,
-                                **pp as i32,
+                            warn!(
+                                "Invalid char in tag: {}\n",
+                                char::from(**pp as u8),
                             );
                             bt_release_tree(root);
                             return 0 as *mut bt_node;

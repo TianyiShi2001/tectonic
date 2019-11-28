@@ -90,16 +90,6 @@ unsafe extern "C" fn _dpx_print_to_stdout(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dpx_message(mut fmt: *const i8, mut args: ...) {
-    let mut argp: ::std::ffi::VaListImpl;
-    if _dpx_quietness > 0i32 {
-        return;
-    }
-    argp = args.clone();
-    _dpx_print_to_stdout(fmt, argp.as_va_list(), false);
-    _last_message_type = DPX_MESG_INFO;
-}
-#[no_mangle]
 pub unsafe extern "C" fn dpx_warning(mut fmt: *const i8, mut args: ...) {
     let mut argp: ::std::ffi::VaListImpl;
     if _dpx_quietness > 1i32 {

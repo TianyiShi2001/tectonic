@@ -32,7 +32,6 @@ use crate::DisplayExt;
 use crate::{info, warn};
 use std::ffi::CStr;
 
-use super::dpx_error::dpx_warning;
 use super::dpx_mem::{new, renew};
 use super::dpx_mfileio::tt_mfgets;
 use crate::{ttstub_input_close, ttstub_input_open, ttstub_input_seek};
@@ -178,9 +177,9 @@ unsafe extern "C" fn read_sfd_record(mut rec: *mut sfd_rec_, mut lbuf: *const i8
                 && *q as i32 != ':' as i32
                 && *q as i32 != '_' as i32
         {
-            dpx_warning(
-                b"Unknown token in subfont mapping table: %c\x00" as *const u8 as *const i8,
-                *q as i32,
+            warn!(
+                "Unknown token in subfont mapping table: {}",
+                char::from(*q as u8),
             );
             return -1i32;
         }
@@ -205,10 +204,9 @@ unsafe extern "C" fn read_sfd_record(mut rec: *mut sfd_rec_, mut lbuf: *const i8
                     return -1i32;
                 } else {
                     if q == p || !(*q as i32 == '\u{0}' as i32 || libc::isspace(*q as _) != 0) {
-                        dpx_warning(
-                            b"Invalid char in subfont mapping table: %c\x00" as *const u8
-                                as *const i8,
-                            *q as i32,
+                        warn!(
+                            "Invalid char in subfont mapping table: {}",
+                            char::from(*q as u8),
                         );
                         return -1i32;
                     }

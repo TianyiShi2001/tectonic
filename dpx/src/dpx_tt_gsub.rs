@@ -38,7 +38,6 @@ use crate::mfree;
 use crate::streq_ptr;
 use crate::{info, warn};
 
-use super::dpx_error::dpx_message;
 use super::dpx_mem::{new, renew};
 use super::dpx_otl_opt::{otl_match_optrule, otl_new_opt, otl_parse_optstring, otl_release_opt};
 use crate::ttstub_input_seek;
@@ -792,13 +791,12 @@ unsafe extern "C" fn otl_gsub_read_feat(mut gsub: *mut otl_gsub_tab, mut sfont: 
                     },
                 };
                 if verbose > 0i32 {
-                    dpx_message(
-                        b"otl_gsub>> OTL script-language enabled: %c%c%c%c.dflt\n\x00" as *const u8
-                            as *const i8,
-                        (*script_list.record.offset(script_idx as isize)).tag[0] as i32,
-                        (*script_list.record.offset(script_idx as isize)).tag[1] as i32,
-                        (*script_list.record.offset(script_idx as isize)).tag[2] as i32,
-                        (*script_list.record.offset(script_idx as isize)).tag[3] as i32,
+                    info!(
+                        "otl_gsub>> OTL script-language enabled: {}{}{}{}.dflt\n",
+                        char::from((*script_list.record.offset(script_idx as isize)).tag[0] as u8),
+                        char::from((*script_list.record.offset(script_idx as isize)).tag[1] as u8),
+                        char::from((*script_list.record.offset(script_idx as isize)).tag[2] as u8),
+                        char::from((*script_list.record.offset(script_idx as isize)).tag[3] as u8),
                     );
                 }
                 ttstub_input_seek(
@@ -842,17 +840,16 @@ unsafe extern "C" fn otl_gsub_read_feat(mut gsub: *mut otl_gsub_tab, mut sfont: 
                         },
                     };
                     if verbose > 0i32 {
-                        dpx_message(
-                            b"otl_gsub>> OTL script-language enabled: %c%c%c%c.%c%c%c%c\n\x00"
-                                as *const u8 as *const i8,
-                            (*script_list.record.offset(script_idx as isize)).tag[0] as i32,
-                            (*script_list.record.offset(script_idx as isize)).tag[1] as i32,
-                            (*script_list.record.offset(script_idx as isize)).tag[2] as i32,
-                            (*script_list.record.offset(script_idx as isize)).tag[3] as i32,
-                            (*langsys_rec).tag[0] as i32,
-                            (*langsys_rec).tag[1] as i32,
-                            (*langsys_rec).tag[2] as i32,
-                            (*langsys_rec).tag[3] as i32,
+                        info!(
+                            "otl_gsub>> OTL script-language enabled: {}{}{}{}.{}{}{}{}\n",
+                            char::from((*script_list.record.offset(script_idx as isize)).tag[0] as u8),
+                            char::from((*script_list.record.offset(script_idx as isize)).tag[1] as u8),
+                            char::from((*script_list.record.offset(script_idx as isize)).tag[2] as u8),
+                            char::from((*script_list.record.offset(script_idx as isize)).tag[3] as u8),
+                            char::from((*langsys_rec).tag[0] as u8),
+                            char::from((*langsys_rec).tag[1] as u8),
+                            char::from((*langsys_rec).tag[2] as u8),
+                            char::from((*langsys_rec).tag[3] as u8),
                         );
                     }
                     ttstub_input_seek(
@@ -918,12 +915,12 @@ unsafe extern "C" fn otl_gsub_read_feat(mut gsub: *mut otl_gsub_tab, mut sfont: 
                 },
             };
             if verbose > 0i32 {
-                dpx_message(
-                    b" %c%c%c%c\x00" as *const u8 as *const i8,
-                    (*feature_list.record.offset(feat_idx as isize)).tag[0] as i32,
-                    (*feature_list.record.offset(feat_idx as isize)).tag[1] as i32,
-                    (*feature_list.record.offset(feat_idx as isize)).tag[2] as i32,
-                    (*feature_list.record.offset(feat_idx as isize)).tag[3] as i32,
+                info!(
+                    " {}{}{}{}",
+                    char::from((*feature_list.record.offset(feat_idx as isize)).tag[0] as u8),
+                    char::from((*feature_list.record.offset(feat_idx as isize)).tag[1] as u8),
+                    char::from((*feature_list.record.offset(feat_idx as isize)).tag[2] as u8),
+                    char::from((*feature_list.record.offset(feat_idx as isize)).tag[3] as u8),
                 );
             }
             offset = gsub_offset

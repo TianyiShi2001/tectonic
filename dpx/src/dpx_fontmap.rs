@@ -41,7 +41,6 @@ use super::dpx_dpxutil::{
     ht_clear_table, ht_init_table, ht_insert_table, ht_lookup_table, ht_remove_table,
 };
 use super::dpx_dpxutil::{parse_c_string, parse_float_decimal};
-use super::dpx_error::dpx_warning;
 use super::dpx_mem::{new, xmalloc};
 use super::dpx_mfileio::tt_mfgets;
 use super::dpx_subfont::{release_sfd_record, sfd_get_subfont_ids};
@@ -667,9 +666,9 @@ unsafe extern "C" fn fontmap_parse_mapdef_dpm(
                 free(q as *mut libc::c_void);
             }
             _ => {
-                dpx_warning(
-                    b"Unrecognized font map option: \'%c\'\x00" as *const u8 as *const i8,
-                    mopt as i32,
+                warn!(
+                    "Unrecognized font map option: \'{}\'",
+                    char::from(mopt as u8),
                 );
                 return -1i32;
             }
@@ -677,9 +676,9 @@ unsafe extern "C" fn fontmap_parse_mapdef_dpm(
         skip_blank(&mut p, endptr);
     }
     if p < endptr && *p as i32 != '\r' as i32 && *p as i32 != '\n' as i32 {
-        dpx_warning(
-            b"Invalid char in fontmap line: %c\x00" as *const u8 as *const i8,
-            *p as i32,
+        warn!(
+            "Invalid char in fontmap line: {}",
+            char::from(*p as u8),
         );
         return -1i32;
     }
@@ -787,9 +786,9 @@ unsafe extern "C" fn fontmap_parse_mapdef_dps(
         skip_blank(&mut p, endptr);
     }
     if p < endptr && *p as i32 != '\r' as i32 && *p as i32 != '\n' as i32 {
-        dpx_warning(
-            b"Invalid char in fontmap line: %c\x00" as *const u8 as *const i8,
-            *p as i32,
+        warn!(
+            "Invalid char in fontmap line: {}",
+            char::from(*p as u8),
         );
         return -1i32;
     }

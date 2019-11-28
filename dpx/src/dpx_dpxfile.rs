@@ -152,7 +152,7 @@ unsafe extern "C" fn check_stream_is_type1(mut handle: rust_input_handle_t) -> b
     {
         /* This was #if-0'd out:
          * p[20] = '\0'; p += 6;
-         * dpx_warning("Ambiguous PostScript resource type: %s", (char *) p);
+         * warn!("Ambiguous PostScript resource type: {}", (char *) p);
          */
         return true;
     }

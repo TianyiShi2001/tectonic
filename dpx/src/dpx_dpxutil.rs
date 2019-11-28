@@ -28,7 +28,6 @@
     unused_mut
 )]
 
-use super::dpx_error::dpx_warning;
 use super::dpx_mem::new;
 use crate::mfree;
 use libc::{free, memcmp, memcpy};
@@ -457,9 +456,9 @@ unsafe extern "C" fn read_c_escchar(
             }
         }
         _ => {
-            dpx_warning(
-                b"Unknown escape char sequence: \\%c\x00" as *const u8 as *const i8,
-                *p.offset(0) as i32,
+            warn!(
+                "Unknown escape char sequence: \\{}",
+                char::from(*p.offset(0) as u8),
             );
             l = 0i32;
             p = p.offset(1)

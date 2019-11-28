@@ -34,7 +34,6 @@ use crate::{info, warn};
 use std::ffi::CStr;
 
 use super::dpx_dpxutil::xtoi;
-use super::dpx_error::dpx_message;
 use super::dpx_mem::new;
 use crate::dpx_pdfobj::{
     pdf_add_array, pdf_add_dict, pdf_add_stream, pdf_copy_name, pdf_deref_obj, pdf_file,
@@ -63,7 +62,7 @@ pub unsafe extern "C" fn dump(mut start: *const i8, mut end: *const i8) {
     while p < end && p < start.offset(50) {
         let fresh0 = p;
         p = p.offset(1);
-        dpx_message(b"%c\x00" as *const u8 as *const i8, *fresh0 as i32);
+        info!("{}", char::from(*fresh0 as u8));
     }
     if p == start.offset(50) {
         info!("...");
